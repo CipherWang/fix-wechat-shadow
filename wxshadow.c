@@ -1,3 +1,5 @@
+// based on https://12101111.github.io/block-wine-wechat-black-window/
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
