@@ -4,6 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <signal.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_aux.h>
 #include <xcb/xcb_event.h>
@@ -13,6 +19,8 @@
 static xcb_connection_t *conn;
 static xcb_screen_t *scr;
 static xcb_atom_t atom;
+static int lock_file = 0;
+
 
 void init_atom() {
   // Get `_NET_WM_NAME` atom
@@ -100,7 +108,63 @@ bool is_wechat(xcb_window_t window) {
   return result;
 }
 
+/***
+ * singleton part
+*/
+
+int acquire_lock() {
+  // Check if an instance of the app is already running
+    int lock_file = open("/tmp/wxshadow.lock", O_RDWR | O_CREAT, 0666);
+    if (lock_file == -1) {
+        perror("Error creating/opening lock file");
+        exit(EXIT_FAILURE);
+    }
+
+    // Try to acquire a lock on the file
+    int lock_status = flock(lock_file, LOCK_EX | LOCK_NB);
+    if (lock_status == -1) {
+        // Another instance is running or an error occurred
+        printf("Another instance of the app is already running.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // The current instance has acquired the lock, execute the app
+    return lock_file;    
+}
+
+void release_lock(int lock_file) {
+    if (lock_file != 0) {
+      printf("release lock...\n");
+      flock(lock_file, LOCK_UN);
+      close(lock_file);
+    }
+}
+
+// Signal handler function
+void signal_handler(int signal) {
+    switch (signal) {
+        case SIGKILL:
+            printf("Received SIGKILL signal. Exiting immediately.\n");
+            release_lock(lock_file);
+            exit(EXIT_FAILURE);
+        case SIGTERM:
+            printf("Received SIGTERM signal. Preparing to exit gracefully.\n");
+            release_lock(lock_file);
+            break;
+        default:
+            printf("Received an unexpected signal (%d).\n", signal);
+            break;
+    }
+}
+
+/**
+ * main entry
+*/
+
 int main(int argc, char **argv) {
+
+  lock_file = acquire_lock();
+
   conn = xcb_connect(NULL, NULL);
   if (xcb_connection_has_error(conn)) {
     fprintf(stderr, "Failed to connect to the X server\n");
@@ -132,5 +196,7 @@ int main(int argc, char **argv) {
   if (conn) {
     xcb_disconnect(conn);
   }
+
+  release_lock(lock_file);
   return 0;
 }
